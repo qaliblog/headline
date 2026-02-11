@@ -1,4 +1,4 @@
-package com.google.mediapipe.examples.facelandmarker
+package com.qali.headline
 /*
  * Copyright 2023 The TensorFlow Authors. All Rights Reserved.
  *

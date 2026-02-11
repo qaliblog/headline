@@ -20,11 +20,11 @@ plugins {
 }
 
 android {
-    namespace 'com.google.mediapipe.examples.facelandmarker'
+    namespace 'com.qali.headline'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.google.mediapipe.examples.facelandmarker"
+        applicationId "com.qali.headline"
         minSdk 24
         targetSdk 34
         versionCode 1

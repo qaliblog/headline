@@ -15,7 +15,7 @@
     ~ limitations under the License.
 -->
 <resources>
-    <string name="app_name">MP Face Landmarker</string>
+    <string name="app_name">headline</string>
 
     <string name="media_pipe">MediaPipe</string>
 

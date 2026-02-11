@@ -13,14 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.mediapipe.examples.facelandmarker
+package com.qali.headline
 
 import android.os.Bundle
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
-import com.google.mediapipe.examples.facelandmarker.databinding.ActivityMainBinding
+import com.qali.headline.databinding.ActivityMainBinding
+import com.google.android.filament.Filament
+import com.google.android.filament.gltfio.Gltfio
 
 class MainActivity : AppCompatActivity() {
     private lateinit var activityMainBinding: ActivityMainBinding
@@ -28,6 +30,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Filament.init()
+        Gltfio.init()
         activityMainBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(activityMainBinding.root)
 

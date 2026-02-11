@@ -1,4 +1,4 @@
-package com.google.mediapipe.examples.facelandmarker.fragment
+package com.qali.headline.fragment
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -8,7 +8,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.google.mediapipe.examples.facelandmarker.R
+import com.qali.headline.R
 
 class ModelPickerBottomSheet(
     private val models: List<String>,

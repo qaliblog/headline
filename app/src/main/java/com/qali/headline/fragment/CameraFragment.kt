@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.mediapipe.examples.facelandmarker.fragment
+package com.qali.headline.fragment
 
 import android.annotation.SuppressLint
 import android.content.res.Configuration
@@ -41,12 +41,12 @@ import androidx.fragment.app.activityViewModels
 import androidx.navigation.Navigation
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_DRAGGING
-import com.google.mediapipe.examples.facelandmarker.FaceLandmarkerHelper
-import com.google.mediapipe.examples.facelandmarker.MainViewModel
-import com.google.mediapipe.examples.facelandmarker.R
-import com.google.mediapipe.examples.facelandmarker.databinding.FragmentCameraBinding
-import com.google.mediapipe.examples.facelandmarker.renderer.FaceMaskRenderer
-import com.google.mediapipe.examples.facelandmarker.util.PoseUtils
+import com.qali.headline.FaceLandmarkerHelper
+import com.qali.headline.MainViewModel
+import com.qali.headline.R
+import com.qali.headline.databinding.FragmentCameraBinding
+import com.qali.headline.renderer.FaceMaskRenderer
+import com.qali.headline.util.PoseUtils
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import java.nio.ByteBuffer
 import java.util.Locale

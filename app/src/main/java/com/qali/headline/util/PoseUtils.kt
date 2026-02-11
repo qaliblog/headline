@@ -1,4 +1,4 @@
-package com.google.mediapipe.examples.facelandmarker.util
+package com.qali.headline.util
 
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import android.opengl.Matrix
