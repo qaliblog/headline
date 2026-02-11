@@ -34,6 +34,7 @@ class FaceMaskRenderer(private val context: Context) {
     private var modelEntity: Int = 0
 
     fun init(surfaceView: SurfaceView) {
+        // Ensure engine is created on the main thread
         val engine = Engine.create()
         this.engine = engine
         renderer = engine.createRenderer()
@@ -52,6 +53,7 @@ class FaceMaskRenderer(private val context: Context) {
             clear = true
         })
 
+        // AssetLoader and ResourceLoader must be used on the same thread as the Engine (Main Thread here)
         assetLoader = AssetLoader(engine, UbershaderProvider(engine), EntityManager.get())
         resourceLoader = ResourceLoader(engine)
 
@@ -77,10 +79,9 @@ class FaceMaskRenderer(private val context: Context) {
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
-                swapChain?.let {
-                    if (engine.isValid) {
-                        engine.destroySwapChain(it)
-                    }
+                val sc = swapChain
+                if (sc != null && engine.isValid) {
+                    engine.destroySwapChain(sc)
                 }
                 swapChain = null
             }
@@ -90,32 +91,30 @@ class FaceMaskRenderer(private val context: Context) {
     fun loadModel(buffer: ByteBuffer) {
         if (isDestroyed.get()) return
 
-        loadExecutor.execute {
+        // Byte buffer reading can be background, but gltfio calls should be Main Thread
+        // because they are thread-affine to the thread that created the Engine.
+        mainExecutor.execute {
+            if (isDestroyed.get()) return@execute
+
             try {
                 val assetLoader = this.assetLoader ?: return@execute
                 val scene = this.scene ?: return@execute
+
+                // Remove old asset
+                filamentAsset?.let { oldAsset ->
+                    scene.removeEntities(oldAsset.entities)
+                    assetLoader.destroyAsset(oldAsset)
+                    filamentAsset = null
+                }
 
                 val asset = assetLoader.createAsset(buffer)
                 if (asset != null) {
                     resourceLoader?.loadResources(asset)
                     asset.releaseSourceData()
 
-                    mainExecutor.execute {
-                        if (isDestroyed.get()) {
-                            // Too late, already destroyed
-                            return@execute
-                        }
-
-                        // Remove old asset
-                        filamentAsset?.let { oldAsset ->
-                            scene.removeEntities(oldAsset.entities)
-                            this.assetLoader?.destroyAsset(oldAsset)
-                        }
-
-                        filamentAsset = asset
-                        scene.addEntities(asset.entities)
-                        modelEntity = asset.root
-                    }
+                    filamentAsset = asset
+                    scene.addEntities(asset.entities)
+                    modelEntity = asset.root
                 }
             } catch (e: Exception) {
                 Log.e("FaceMaskRenderer", "Error loading model", e)
@@ -150,6 +149,7 @@ class FaceMaskRenderer(private val context: Context) {
         if (isDestroyed.getAndSet(true)) return
 
         loadExecutor.shutdown()
+        // Must destroy Filament objects on the same thread they were created (Main Thread)
         mainExecutor.execute {
             val engine = this.engine ?: return@execute
 

@@ -28,5 +28,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "MP Face Landmarker"
+rootProject.name = "headline"
 include ':app'
