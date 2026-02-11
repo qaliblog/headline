@@ -25,10 +25,24 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <SurfaceView
+        android:id="@+id/filament_surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <com.google.mediapipe.examples.facelandmarker.OverlayView
         android:id="@+id/overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_model_picker"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="100dp"
+        app:srcCompat="@android:drawable/ic_menu_add" />
 
     <include
         android:id="@+id/bottom_sheet_layout"
