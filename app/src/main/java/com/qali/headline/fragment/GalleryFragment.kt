@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.mediapipe.examples.facelandmarker.fragment
+package com.qali.headline.fragment
 
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
@@ -33,9 +33,9 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.viewpager2.widget.ViewPager2
-import com.google.mediapipe.examples.facelandmarker.FaceLandmarkerHelper
-import com.google.mediapipe.examples.facelandmarker.MainViewModel
-import com.google.mediapipe.examples.facelandmarker.databinding.FragmentGalleryBinding
+import com.qali.headline.FaceLandmarkerHelper
+import com.qali.headline.MainViewModel
+import com.qali.headline.databinding.FragmentGalleryBinding
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import java.util.Locale
 import java.util.concurrent.Executors

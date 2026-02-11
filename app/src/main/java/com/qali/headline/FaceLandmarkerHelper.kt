@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.mediapipe.examples.facelandmarker
+package com.qali.headline
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -109,6 +109,7 @@ class FaceLandmarkerHelper(
                     .setMinFacePresenceConfidence(minFacePresenceConfidence)
                     .setNumFaces(maxNumFaces)
                     .setOutputFaceBlendshapes(true)
+                    .setOutputFacialTransformationMatrixes(true)
                     .setRunningMode(runningMode)
 
             // The ResultListener and ErrorListener only use for LIVE_STREAM mode.

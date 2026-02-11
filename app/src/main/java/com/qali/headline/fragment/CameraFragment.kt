@@ -13,17 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.mediapipe.examples.facelandmarker.fragment
+package com.qali.headline.fragment
 
 import android.annotation.SuppressLint
 import android.content.res.Configuration
+import android.graphics.PixelFormat
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.Choreographer
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Preview
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -37,21 +41,18 @@ import androidx.fragment.app.activityViewModels
 import androidx.navigation.Navigation
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_DRAGGING
-import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_IDLE
-import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_SETTLING
-import androidx.viewpager2.widget.ViewPager2.ScrollState
-import com.google.mediapipe.examples.facelandmarker.FaceLandmarkerHelper
-import com.google.mediapipe.examples.facelandmarker.MainViewModel
-import com.google.mediapipe.examples.facelandmarker.R
-import com.google.mediapipe.examples.facelandmarker.databinding.FragmentCameraBinding
+import com.qali.headline.FaceLandmarkerHelper
+import com.qali.headline.MainViewModel
+import com.qali.headline.R
+import com.qali.headline.databinding.FragmentCameraBinding
+import com.qali.headline.renderer.FaceMaskRenderer
+import com.qali.headline.util.PoseUtils
 import com.google.mediapipe.tasks.vision.core.RunningMode
+import java.nio.ByteBuffer
 import java.util.Locale
-import java.util.Optional
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlin.jvm.optionals.toList
-import kotlin.math.roundToInt
 
 class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
@@ -79,8 +80,23 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     /** Blocking ML operations are performed using this executor */
     private lateinit var backgroundExecutor: ExecutorService
 
+    private lateinit var faceMaskRenderer: FaceMaskRenderer
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            faceMaskRenderer.render()
+            Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { loadModelFromUri(it) }
+    }
+
     override fun onResume() {
         super.onResume()
+        Choreographer.getInstance().postFrameCallback(frameCallback)
         // Make sure that all permissions are still present, since the
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
@@ -100,6 +116,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onPause() {
         super.onPause()
+        Choreographer.getInstance().removeFrameCallback(frameCallback)
         if(this::faceLandmarkerHelper.isInitialized) {
             viewModel.setMaxFaces(faceLandmarkerHelper.maxNumFaces)
             viewModel.setMinFaceDetectionConfidence(faceLandmarkerHelper.minFaceDetectionConfidence)
@@ -114,6 +131,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onDestroyView() {
         _fragmentCameraBinding = null
+        faceMaskRenderer.onDestroy()
         super.onDestroyView()
 
         // Shut down our background executor
@@ -137,6 +155,20 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     @SuppressLint("MissingPermission")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        faceMaskRenderer = FaceMaskRenderer(requireContext())
+        faceMaskRenderer.setDebugMode(false) // Set to true to see debug cube and logs
+        fragmentCameraBinding.filamentSurface.apply {
+            setZOrderOnTop(true)
+            holder.setFormat(PixelFormat.TRANSLUCENT)
+            faceMaskRenderer.init(this)
+        }
+
+        loadDefaultModel()
+
+        fragmentCameraBinding.fabModelPicker.setOnClickListener {
+            showModelPicker()
+        }
 
         with(fragmentCameraBinding.recyclerviewResults) {
             layoutManager = LinearLayoutManager(requireContext())
@@ -168,6 +200,52 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
+    }
+
+    private fun loadDefaultModel() {
+        try {
+            val buffer = readAsset("models/face_mask.glb")
+            faceMaskRenderer.loadModel(buffer)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load default model", e)
+        }
+    }
+
+    private fun readAsset(path: String): ByteBuffer {
+        val inputStream = requireContext().assets.open(path)
+        val bytes = inputStream.readBytes()
+        val buffer = ByteBuffer.allocateDirect(bytes.size)
+        buffer.put(bytes)
+        buffer.flip()
+        return buffer
+    }
+
+    private fun showModelPicker() {
+        val assets = requireContext().assets.list("models")?.toList() ?: emptyList()
+        val bottomSheet = ModelPickerBottomSheet(
+            models = assets,
+            onModelSelected = { modelPath ->
+                val buffer = readAsset("models/$modelPath")
+                faceMaskRenderer.loadModel(buffer)
+            },
+            onFilePickerClicked = {
+                filePickerLauncher.launch("*/*")
+            }
+        )
+        bottomSheet.show(childFragmentManager, "ModelPicker")
+    }
+
+    private fun loadModelFromUri(uri: Uri) {
+        try {
+            val inputStream = requireContext().contentResolver.openInputStream(uri)
+            val bytes = inputStream?.readBytes() ?: return
+            val buffer = ByteBuffer.allocateDirect(bytes.size)
+            buffer.put(bytes)
+            buffer.flip()
+            faceMaskRenderer.loadModel(buffer)
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Failed to load model", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun initBottomSheetControls() {
@@ -409,6 +487,23 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     resultBundle.inputImageWidth,
                     RunningMode.LIVE_STREAM
                 )
+
+                // Update 3D model transform
+                if (resultBundle.result.faceLandmarks().isNotEmpty() &&
+                    resultBundle.result.facialTransformationMatrixes().isPresent) {
+                    val landmarks = resultBundle.result.faceLandmarks()[0]
+                    val poseMatrix = resultBundle.result.facialTransformationMatrixes().get()[0]
+                    val aspect = fragmentCameraBinding.filamentSurface.width.toFloat() /
+                                 fragmentCameraBinding.filamentSurface.height.toFloat()
+
+                    val matrix = PoseUtils.getFinalMatrix(
+                        poseMatrix,
+                        landmarks,
+                        aspect
+                    )
+                    faceMaskRenderer.updateModelTransform(matrix)
+                }
+
                 // Force a redraw
                 fragmentCameraBinding.overlay.invalidate()
             }

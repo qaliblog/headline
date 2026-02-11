@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package com.google.mediapipe.examples.facelandmarker.fragment
+package com.qali.headline.fragment
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
-import com.google.mediapipe.examples.facelandmarker.databinding.FaceBlendshapesResultBinding
+import com.qali.headline.databinding.FaceBlendshapesResultBinding
 import com.google.mediapipe.tasks.components.containers.Category
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 

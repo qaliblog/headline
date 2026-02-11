@@ -19,4 +19,10 @@ task downloadTaskFile(type: Download) {
     overwrite false
 }
 
-preBuild.dependsOn downloadTaskFile
+task downloadSampleModel(type: Download) {
+    src 'https://github.com/KhronosGroup/glTF-Sample-Models/raw/main/2.0/Duck/glTF-Binary/Duck.glb'
+    dest project.ext.ASSET_DIR + '/models/face_mask.glb'
+    overwrite false
+}
+
+preBuild.dependsOn downloadTaskFile, downloadSampleModel
