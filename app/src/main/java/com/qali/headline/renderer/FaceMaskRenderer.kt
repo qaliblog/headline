@@ -9,6 +9,7 @@ import com.google.android.filament.gltfio.*
 import com.google.android.filament.utils.*
 import java.nio.Buffer
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -28,13 +29,95 @@ class FaceMaskRenderer(private val context: Context) {
     private var filamentAsset: FilamentAsset? = null
 
     private val mainExecutor = context.mainExecutor
-    private val loadExecutor = Executors.newSingleThreadExecutor()
     private val isDestroyed = AtomicBoolean(false)
 
     private var modelEntity: Int = 0
+    private var debugCubeEntity: Int = 0
+    private var debugMode: Boolean = false
+
+    fun setDebugMode(enabled: Boolean) {
+        this.debugMode = enabled
+        mainExecutor.execute {
+            if (debugMode) {
+                createDebugCube()
+            } else {
+                removeDebugCube()
+            }
+        }
+    }
+
+    private fun createDebugCube() {
+        val engine = this.engine ?: return
+        if (debugCubeEntity != 0) return
+
+        debugCubeEntity = EntityManager.get().create()
+
+        // Simple cube vertices (pos, color)
+        val vertices = floatArrayOf(
+            -0.05f, -0.05f,  0.05f, 1f, 0f, 0f,
+             0.05f, -0.05f,  0.05f, 0f, 1f, 0f,
+             0.05f,  0.05f,  0.05f, 0f, 0f, 1f,
+            -0.05f,  0.05f,  0.05f, 1f, 1f, 0f,
+            -0.05f, -0.05f, -0.05f, 1f, 0f, 1f,
+             0.05f, -0.05f, -0.05f, 0f, 1f, 1f,
+             0.05f,  0.05f, -0.05f, 1f, 1f, 1f,
+            -0.05f,  0.05f, -0.05f, 0f, 0f, 0f
+        )
+        val vertexBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .put(vertices)
+            .flip()
+
+        val vb = VertexBuffer.Builder()
+            .vertexCount(8)
+            .bufferCount(1)
+            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 24)
+            .attribute(VertexBuffer.VertexAttribute.COLOR, 0, VertexBuffer.AttributeType.FLOAT3, 12, 24)
+            .build(engine)
+
+        vb.setBufferAt(engine, 0, vertexBuffer)
+
+        val indices = shortArrayOf(
+            0, 1, 2, 2, 3, 0,
+            1, 5, 6, 6, 2, 1,
+            5, 4, 7, 7, 6, 5,
+            4, 0, 3, 3, 7, 4,
+            3, 2, 6, 6, 7, 3,
+            0, 1, 5, 5, 4, 0
+        )
+        val indexBuffer = ByteBuffer.allocateDirect(indices.size * 2)
+            .order(ByteOrder.nativeOrder())
+            .asShortBuffer()
+            .put(indices)
+            .flip()
+
+        // Using fully qualified name for IndexType based on jar inspection
+        val ib = IndexBuffer.Builder()
+            .indexCount(indices.size)
+            .bufferType(com.google.android.filament.IndexBuffer.Builder.IndexType.USHORT)
+            .build(engine)
+
+        ib.setBuffer(engine, indexBuffer)
+
+        RenderableManager.Builder(1)
+            .boundingBox(Box(0f, 0f, 0f, 0.05f, 0.05f, 0.05f))
+            .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vb, ib)
+            .build(engine, debugCubeEntity)
+
+        scene?.addEntity(debugCubeEntity)
+    }
+
+    private fun removeDebugCube() {
+        val engine = this.engine ?: return
+        if (debugCubeEntity != 0) {
+            scene?.removeEntity(debugCubeEntity)
+            engine.destroyEntity(debugCubeEntity)
+            debugCubeEntity = 0
+        }
+    }
 
     fun init(surfaceView: SurfaceView) {
-        // Ensure engine is created on the main thread
         val engine = Engine.create()
         this.engine = engine
         renderer = engine.createRenderer()
@@ -53,7 +136,6 @@ class FaceMaskRenderer(private val context: Context) {
             clear = true
         })
 
-        // AssetLoader and ResourceLoader must be used on the same thread as the Engine (Main Thread here)
         assetLoader = AssetLoader(engine, UbershaderProvider(engine), EntityManager.get())
         resourceLoader = ResourceLoader(engine)
 
@@ -91,8 +173,6 @@ class FaceMaskRenderer(private val context: Context) {
     fun loadModel(buffer: ByteBuffer) {
         if (isDestroyed.get()) return
 
-        // Byte buffer reading can be background, but gltfio calls should be Main Thread
-        // because they are thread-affine to the thread that created the Engine.
         mainExecutor.execute {
             if (isDestroyed.get()) return@execute
 
@@ -100,7 +180,6 @@ class FaceMaskRenderer(private val context: Context) {
                 val assetLoader = this.assetLoader ?: return@execute
                 val scene = this.scene ?: return@execute
 
-                // Remove old asset
                 filamentAsset?.let { oldAsset ->
                     scene.removeEntities(oldAsset.entities)
                     assetLoader.destroyAsset(oldAsset)
@@ -124,9 +203,23 @@ class FaceMaskRenderer(private val context: Context) {
 
     fun updateModelTransform(matrix: FloatArray) {
         val engine = this.engine ?: return
-        if (modelEntity != 0 && !isDestroyed.get()) {
+        if (isDestroyed.get()) return
+
+        if (debugMode) {
+            Log.d("FaceMaskRenderer", "Final Matrix: ${matrix.joinToString(", ")}")
+        }
+
+        if (modelEntity != 0) {
             val tm = engine.transformManager
             val instance = tm.getInstance(modelEntity)
+            if (instance != 0) {
+                tm.setTransform(instance, matrix)
+            }
+        }
+
+        if (debugCubeEntity != 0) {
+            val tm = engine.transformManager
+            val instance = tm.getInstance(debugCubeEntity)
             if (instance != 0) {
                 tm.setTransform(instance, matrix)
             }
@@ -148,14 +241,13 @@ class FaceMaskRenderer(private val context: Context) {
     fun onDestroy() {
         if (isDestroyed.getAndSet(true)) return
 
-        loadExecutor.shutdown()
-        // Must destroy Filament objects on the same thread they were created (Main Thread)
         mainExecutor.execute {
             val engine = this.engine ?: return@execute
 
             filamentAsset?.let {
                 assetLoader?.destroyAsset(it)
             }
+            removeDebugCube()
             assetLoader?.destroy()
             resourceLoader?.destroy()
 

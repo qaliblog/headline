@@ -157,6 +157,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         super.onViewCreated(view, savedInstanceState)
 
         faceMaskRenderer = FaceMaskRenderer(requireContext())
+        faceMaskRenderer.setDebugMode(false) // Set to true to see debug cube and logs
         fragmentCameraBinding.filamentSurface.apply {
             setZOrderOnTop(true)
             holder.setFormat(PixelFormat.TRANSLUCENT)
@@ -488,12 +489,15 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                 )
 
                 // Update 3D model transform
-                if (resultBundle.result.faceLandmarks().isNotEmpty()) {
+                if (resultBundle.result.faceLandmarks().isNotEmpty() &&
+                    resultBundle.result.facialTransformationMatrixes().isPresent) {
                     val landmarks = resultBundle.result.faceLandmarks()[0]
+                    val poseMatrix = resultBundle.result.facialTransformationMatrixes().get()[0]
                     val aspect = fragmentCameraBinding.filamentSurface.width.toFloat() /
                                  fragmentCameraBinding.filamentSurface.height.toFloat()
 
-                    val matrix = PoseUtils.calculateTransformMatrix(
+                    val matrix = PoseUtils.getFinalMatrix(
+                        poseMatrix,
                         landmarks,
                         aspect
                     )

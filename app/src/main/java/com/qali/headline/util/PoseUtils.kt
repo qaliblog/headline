@@ -1,98 +1,68 @@
 package com.qali.headline.util
 
-import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import android.opengl.Matrix
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import kotlin.math.sqrt
 
 object PoseUtils {
-    // Landmark indices
-    private const val NOSE_TIP = 1
-    private const val LEFT_EYE = 33
-    private const val RIGHT_EYE = 263
+    // Tuning Constants
+    var OFFSET_X = 0.0f
+    var OFFSET_Y = 0.0f
+    var OFFSET_Z = 0.0f
+    var SCALE_FACTOR = 1.0f
 
     /**
-     * Calculates a 4x4 transform matrix for the 3D model using normalized landmarks.
-     *
-     * @param landmarks Normalized landmarks from MediaPipe
-     * @param aspect Aspect ratio of the view (width / height)
+     * Combines MediaPipe face pose with correction, scale and offset.
+     * Order: Pose * Correction * Scale * Offset
      */
-    fun calculateTransformMatrix(
+    fun getFinalMatrix(
+        facePoseMatrix: FloatArray, // 4x4 column-major from MediaPipe
         landmarks: List<NormalizedLandmark>,
         aspect: Float
     ): FloatArray {
-        val leftEye = landmarks[LEFT_EYE]
-        val rightEye = landmarks[RIGHT_EYE]
-        val noseTip = landmarks[NOSE_TIP]
+        val finalMatrix = FloatArray(16)
+        val temp1 = FloatArray(16)
+        val temp2 = FloatArray(16)
 
-        // 1. Calculate Basis Vectors for Rotation
-        // We adjust for aspect ratio to get correct angles in screen space
-        val dx = (rightEye.x() - leftEye.x()) * aspect
-        val dy = rightEye.y() - leftEye.y()
-        val dz = rightEye.z() - leftEye.z()
-        val dist = sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
+        // 1. Offset Translation Matrix (to center model)
+        val offsetMatrix = FloatArray(16)
+        Matrix.setIdentityM(offsetMatrix, 0)
+        Matrix.translateM(offsetMatrix, 0, OFFSET_X, OFFSET_Y, OFFSET_Z)
 
-        val rx = dx / dist
-        val ry = dy / dist
-        val rz = dz / dist
+        // 2. Scale Matrix
+        // Compute scale from 3D distance between eyes (landmarks 33 and 263)
+        val eyeDist = calculate3DDistance(landmarks[33], landmarks[263], aspect)
+        // Reference eye distance (normalized) is roughly 0.06 in canonical space?
+        // We'll use a relative scale.
+        val baseScale = eyeDist * 10.0f * SCALE_FACTOR
+        val scaleMatrix = FloatArray(16)
+        Matrix.setIdentityM(scaleMatrix, 0)
+        Matrix.scaleM(scaleMatrix, 0, baseScale, baseScale, baseScale)
 
-        val midNormX = (leftEye.x() + rightEye.x()) / 2f
-        val midNormY = (leftEye.y() + rightEye.y()) / 2f
-        val midNormZ = (leftEye.z() + rightEye.z()) / 2f
+        // 3. Correction Matrix (Coordinate System Mismatch)
+        // MediaPipe facialTransformationMatrix usually has:
+        // X: right, Y: up, Z: forward (towards camera)
+        // Filament: X: right, Y: up, Z: back (out of screen)
+        // We might need to flip Z.
+        val correctionMatrix = FloatArray(16)
+        Matrix.setIdentityM(correctionMatrix, 0)
+        // Matrix.scaleM(correctionMatrix, 0, 1f, 1f, -1f) // Example flip
 
-        val nx = (noseTip.x() - midNormX) * aspect
-        val ny = noseTip.y() - midNormY
-        val nz = noseTip.z() - midNormZ
+        // 4. Combine: Final = Pose * Correction * Scale * Offset
+        // Multiply: temp1 = Scale * Offset
+        Matrix.multiplyMM(temp1, 0, scaleMatrix, 0, offsetMatrix, 0)
+        // Multiply: temp2 = Correction * temp1
+        Matrix.multiplyMM(temp2, 0, correctionMatrix, 0, temp1, 0)
+        // Multiply: final = Pose * temp2
+        Matrix.multiplyMM(finalMatrix, 0, facePoseMatrix, 0, temp2, 0)
 
-        // Z-axis (Forward): Cross product of X and Nose vector
-        var zx = ry * nz - rz * ny
-        var zy = rz * nx - rx * nz
-        var zz = rx * ny - ry * nx
-        val zDist = sqrt((zx * zx + zy * zy + zz * zz).toDouble()).toFloat()
-        zx /= zDist
-        zy /= zDist
-        zz /= zDist
+        return finalMatrix
+    }
 
-        // Y-axis (Up): Cross product of Z and X
-        val yx = zy * rz - zz * ry
-        val yy = zz * rx - zx * rz
-        val yz = zx * ry - zy * rx
-
-        // 2. Scale
-        // Use eye distance. Since everything is normalized [0, 1],
-        // we scale the model to match the head size.
-        // A typical head is about 3x the eye distance.
-        val scale = dist * 2.0f
-
-        // 3. Position
-        // Map [0, 1] to Filament space [-aspect, aspect] x [-1, 1]
-        // Assuming camera is set up with height 2.0 at Z=0.
-        val tx = (midNormX - 0.5f) * 2f * aspect
-        val ty = (0.5f - midNormY) * 2f
-
-        // 4. Build Matrix (Column-major)
-        val matrix = FloatArray(16)
-        Matrix.setIdentityM(matrix, 0)
-
-        // Column 0 (Right)
-        matrix[0] = rx * scale
-        matrix[1] = -ry * scale // Filament Y is up
-        matrix[2] = rz * scale
-
-        // Column 1 (Up)
-        matrix[4] = yx * scale
-        matrix[5] = -yy * scale
-        matrix[6] = yz * scale
-
-        // Column 2 (Forward)
-        matrix[8] = zx * scale
-        matrix[9] = -zy * scale
-        matrix[10] = zz * scale
-
-        // Column 3 (Translation)
-        matrix[12] = tx
-        matrix[13] = ty
-        matrix[14] = -0.5f // Slightly in front of origin
-
-        return matrix
+    private fun calculate3DDistance(p1: NormalizedLandmark, p2: NormalizedLandmark, aspect: Float): Float {
+        val dx = (p1.x() - p2.x()) * aspect
+        val dy = p1.y() - p2.y()
+        val dz = p1.z() - p2.z()
+        return sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
     }
 }
