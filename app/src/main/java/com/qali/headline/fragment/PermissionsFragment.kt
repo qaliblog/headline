@@ -27,15 +27,18 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.Navigation
 import com.qali.headline.R
 
-private val PERMISSIONS_REQUIRED = arrayOf(Manifest.permission.CAMERA)
+private val PERMISSIONS_REQUIRED = arrayOf(
+    Manifest.permission.CAMERA,
+    Manifest.permission.RECORD_AUDIO
+)
 
 class PermissionsFragment : Fragment() {
 
     private val requestPermissionLauncher =
         registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { isGranted: Boolean ->
-            if (isGranted) {
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            if (permissions.all { it.value }) {
                 Toast.makeText(
                     context,
                     "Permission request granted",
@@ -53,18 +56,10 @@ class PermissionsFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        when (PackageManager.PERMISSION_GRANTED) {
-            ContextCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.CAMERA
-            ) -> {
-                navigateToCamera()
-            }
-            else -> {
-                requestPermissionLauncher.launch(
-                    Manifest.permission.CAMERA
-                )
-            }
+        if (hasPermissions(requireContext())) {
+            navigateToCamera()
+        } else {
+            requestPermissionLauncher.launch(PERMISSIONS_REQUIRED)
         }
     }
 
