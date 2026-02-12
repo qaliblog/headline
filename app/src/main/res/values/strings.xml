@@ -44,6 +44,11 @@
         Threshold</string>
     <string name="label_num_faces">Number of Faces</string>
     <string name="label_delegate">Delegate</string>
+    <string name="label_model_scale">Scale</string>
+    <string name="label_model_offset_x">Offset X</string>
+    <string name="label_model_offset_y">Offset Y</string>
+    <string name="label_model_offset_z">Offset Z</string>
+    <string name="label_record_video">Record Video</string>
 
     <string-array name="delegate_spinner_titles">
         <item>CPU</item>

@@ -31,6 +31,11 @@ class MainViewModel : ViewModel() {
         .DEFAULT_FACE_PRESENCE_CONFIDENCE
     private var _maxFaces: Int = FaceLandmarkerHelper.DEFAULT_NUM_FACES
 
+    private var _scaleFactor: Float = 1.0f
+    private var _offsetX: Float = 0.0f
+    private var _offsetY: Float = 0.0f
+    private var _offsetZ: Float = 0.0f
+
     val currentDelegate: Int get() = _delegate
     val currentMinFaceDetectionConfidence: Float
         get() =
@@ -42,6 +47,11 @@ class MainViewModel : ViewModel() {
         get() =
             _minFacePresenceConfidence
     val currentMaxFaces: Int get() = _maxFaces
+
+    val currentScaleFactor: Float get() = _scaleFactor
+    val currentOffsetX: Float get() = _offsetX
+    val currentOffsetY: Float get() = _offsetY
+    val currentOffsetZ: Float get() = _offsetZ
 
     fun setDelegate(delegate: Int) {
         _delegate = delegate
@@ -59,5 +69,21 @@ class MainViewModel : ViewModel() {
 
     fun setMaxFaces(maxResults: Int) {
         _maxFaces = maxResults
+    }
+
+    fun setScaleFactor(scale: Float) {
+        _scaleFactor = scale
+    }
+
+    fun setOffsetX(x: Float) {
+        _offsetX = x
+    }
+
+    fun setOffsetY(y: Float) {
+        _offsetY = y
+    }
+
+    fun setOffsetZ(z: Float) {
+        _offsetZ = z
     }
 }

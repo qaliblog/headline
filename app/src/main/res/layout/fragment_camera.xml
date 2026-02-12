@@ -44,6 +44,16 @@
         android:layout_marginBottom="100dp"
         app:srcCompat="@android:drawable/ic_menu_add" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_record"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="100dp"
+        app:srcCompat="@drawable/ic_baseline_photo_camera_24"
+        app:tint="@android:color/white" />
+
     <include
         android:id="@+id/bottom_sheet_layout"
         layout="@layout/info_bottom_sheet" />

@@ -16,9 +16,18 @@
 package com.qali.headline.fragment
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.MediaRecorder
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Choreographer
@@ -44,10 +53,12 @@ import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_DRAGGING
 import com.qali.headline.FaceLandmarkerHelper
 import com.qali.headline.MainViewModel
 import com.qali.headline.R
+import com.qali.headline.RecordingService
 import com.qali.headline.databinding.FragmentCameraBinding
 import com.qali.headline.renderer.FaceMaskRenderer
 import com.qali.headline.util.PoseUtils
 import com.google.mediapipe.tasks.vision.core.RunningMode
+import java.io.File
 import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -77,6 +88,9 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraFacing = CameraSelector.LENS_FACING_FRONT
 
+    private var isRecording = false
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+
     /** Blocking ML operations are performed using this executor */
     private lateinit var backgroundExecutor: ExecutorService
 
@@ -92,6 +106,19 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { loadModelFromUri(it) }
+    }
+
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data ?: return@registerForActivityResult
+            startRecordingWithPermission(data)
+        } else {
+            Toast.makeText(requireContext(), "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+            isRecording = false
+            updateRecordButtonUi()
+        }
     }
 
     override fun onResume() {
@@ -130,6 +157,9 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     }
 
     override fun onDestroyView() {
+        if (isRecording) {
+            stopRecording()
+        }
         _fragmentCameraBinding = null
         faceMaskRenderer.onDestroy()
         super.onDestroyView()
@@ -170,6 +200,15 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             showModelPicker()
         }
 
+        mediaProjectionManager = requireContext().getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        fragmentCameraBinding.fabRecord.setOnClickListener {
+            if (isRecording) {
+                stopRecording()
+            } else {
+                startRecording()
+            }
+        }
+
         with(fragmentCameraBinding.recyclerviewResults) {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = faceBlendshapesResultAdapter
@@ -200,6 +239,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
+        updateModelAdjusterUi()
     }
 
     private fun loadDefaultModel() {
@@ -353,7 +393,112 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     /* no op */
                 }
             }
+
+        // Model Scale
+        fragmentCameraBinding.bottomSheetLayout.scaleMinus.setOnClickListener {
+            if (viewModel.currentScaleFactor > 0.1f) {
+                viewModel.setScaleFactor(viewModel.currentScaleFactor - 0.1f)
+                updateModelAdjusterUi()
+            }
+        }
+        fragmentCameraBinding.bottomSheetLayout.scalePlus.setOnClickListener {
+            if (viewModel.currentScaleFactor < 5.0f) {
+                viewModel.setScaleFactor(viewModel.currentScaleFactor + 0.1f)
+                updateModelAdjusterUi()
+            }
+        }
+
+        // Offset X
+        fragmentCameraBinding.bottomSheetLayout.offsetXMinus.setOnClickListener {
+            viewModel.setOffsetX(viewModel.currentOffsetX - 0.01f)
+            updateModelAdjusterUi()
+        }
+        fragmentCameraBinding.bottomSheetLayout.offsetXPlus.setOnClickListener {
+            viewModel.setOffsetX(viewModel.currentOffsetX + 0.01f)
+            updateModelAdjusterUi()
+        }
+
+        // Offset Y
+        fragmentCameraBinding.bottomSheetLayout.offsetYMinus.setOnClickListener {
+            viewModel.setOffsetY(viewModel.currentOffsetY - 0.01f)
+            updateModelAdjusterUi()
+        }
+        fragmentCameraBinding.bottomSheetLayout.offsetYPlus.setOnClickListener {
+            viewModel.setOffsetY(viewModel.currentOffsetY + 0.01f)
+            updateModelAdjusterUi()
+        }
+
+        // Offset Z
+        fragmentCameraBinding.bottomSheetLayout.offsetZMinus.setOnClickListener {
+            viewModel.setOffsetZ(viewModel.currentOffsetZ - 0.01f)
+            updateModelAdjusterUi()
+        }
+        fragmentCameraBinding.bottomSheetLayout.offsetZPlus.setOnClickListener {
+            viewModel.setOffsetZ(viewModel.currentOffsetZ + 0.01f)
+            updateModelAdjusterUi()
+        }
     }
+
+    private fun startRecording() {
+        if (isRecording) return
+        isRecording = true
+        updateRecordButtonUi()
+
+        val intent = mediaProjectionManager.createScreenCaptureIntent()
+        screenCaptureLauncher.launch(intent)
+    }
+
+    private fun startRecordingWithPermission(data: Intent) {
+        try {
+            // Start Foreground Service with projection data
+            val serviceIntent = Intent(requireContext(), RecordingService::class.java).apply {
+                putExtra("RESULT_CODE", Activity.RESULT_OK)
+                putExtra("DATA", data)
+            }
+            ContextCompat.startForegroundService(requireContext(), serviceIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start recording service", e)
+            Toast.makeText(requireContext(), "Failed to start recording: ${e.message}", Toast.LENGTH_SHORT).show()
+            isRecording = false
+            updateRecordButtonUi()
+        }
+    }
+
+    private fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+        updateRecordButtonUi()
+
+        val serviceIntent = Intent(requireContext(), RecordingService::class.java)
+        requireContext().stopService(serviceIntent)
+
+        Toast.makeText(requireContext(), "Video saved to External Files", Toast.LENGTH_LONG).show()
+    }
+
+    private fun updateRecordButtonUi() {
+        if (isRecording) {
+            fragmentCameraBinding.fabRecord.setImageResource(android.R.drawable.ic_media_pause)
+        } else {
+            fragmentCameraBinding.fabRecord.setImageResource(R.drawable.ic_baseline_photo_camera_24)
+        }
+    }
+
+    private fun updateModelAdjusterUi() {
+        fragmentCameraBinding.bottomSheetLayout.scaleValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentScaleFactor)
+        fragmentCameraBinding.bottomSheetLayout.offsetXValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentOffsetX)
+        fragmentCameraBinding.bottomSheetLayout.offsetYValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentOffsetY)
+        fragmentCameraBinding.bottomSheetLayout.offsetZValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentOffsetZ)
+
+        PoseUtils.SCALE_FACTOR = viewModel.currentScaleFactor
+        PoseUtils.OFFSET_X = viewModel.currentOffsetX
+        PoseUtils.OFFSET_Y = viewModel.currentOffsetY
+        PoseUtils.OFFSET_Z = viewModel.currentOffsetZ
+    }
+
 
     // Update the values displayed in the bottom sheet. Reset Facelandmarker
     // helper.
