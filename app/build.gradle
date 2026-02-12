@@ -107,10 +107,4 @@ dependencies {
 
     // MediaPipe Library
     implementation 'com.google.mediapipe:tasks-vision:0.10.14'
-
-    // Filament
-    def filament_version = "1.51.0"
-    implementation "com.google.android.filament:filament-android:$filament_version"
-    implementation "com.google.android.filament:gltfio-android:$filament_version"
-    implementation "com.google.android.filament:filament-utils-android:$filament_version"
 }

@@ -6,25 +6,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
 import com.qali.headline.databinding.ActivityMainBinding
-import com.google.android.filament.Filament
-import com.google.android.filament.gltfio.Gltfio
 
 class MainActivity : AppCompatActivity() {
     private lateinit var activityMainBinding: ActivityMainBinding
     private val viewModel : MainViewModel by viewModels()
 
-    companion object {
-        private var isFilamentInitialized = false
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        if (!isFilamentInitialized) {
-            Filament.init()
-            Gltfio.init()
-            isFilamentInitialized = true
-        }
 
         activityMainBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(activityMainBinding.root)
