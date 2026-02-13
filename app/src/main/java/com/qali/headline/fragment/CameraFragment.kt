@@ -212,7 +212,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
-        updateModelAdjusterUi()
     }
 
     private fun loadMaskFromUri(uri: Uri) {
@@ -355,50 +354,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     /* no op */
                 }
             }
-
-        // Model Scale
-        fragmentCameraBinding.bottomSheetLayout.scaleMinus.setOnClickListener {
-            if (viewModel.currentScaleFactor > 0.1f) {
-                viewModel.setScaleFactor(viewModel.currentScaleFactor - 0.1f)
-                updateModelAdjusterUi()
-            }
-        }
-        fragmentCameraBinding.bottomSheetLayout.scalePlus.setOnClickListener {
-            if (viewModel.currentScaleFactor < 5.0f) {
-                viewModel.setScaleFactor(viewModel.currentScaleFactor + 0.1f)
-                updateModelAdjusterUi()
-            }
-        }
-
-        // Offset X
-        fragmentCameraBinding.bottomSheetLayout.offsetXMinus.setOnClickListener {
-            viewModel.setOffsetX(viewModel.currentOffsetX - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetXPlus.setOnClickListener {
-            viewModel.setOffsetX(viewModel.currentOffsetX + 0.01f)
-            updateModelAdjusterUi()
-        }
-
-        // Offset Y
-        fragmentCameraBinding.bottomSheetLayout.offsetYMinus.setOnClickListener {
-            viewModel.setOffsetY(viewModel.currentOffsetY - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetYPlus.setOnClickListener {
-            viewModel.setOffsetY(viewModel.currentOffsetY + 0.01f)
-            updateModelAdjusterUi()
-        }
-
-        // Offset Z
-        fragmentCameraBinding.bottomSheetLayout.offsetZMinus.setOnClickListener {
-            viewModel.setOffsetZ(viewModel.currentOffsetZ - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetZPlus.setOnClickListener {
-            viewModel.setOffsetZ(viewModel.currentOffsetZ + 0.01f)
-            updateModelAdjusterUi()
-        }
     }
 
     private fun startRecording() {
@@ -445,16 +400,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         }
     }
 
-    private fun updateModelAdjusterUi() {
-        fragmentCameraBinding.bottomSheetLayout.scaleValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentScaleFactor)
-        fragmentCameraBinding.bottomSheetLayout.offsetXValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetX)
-        fragmentCameraBinding.bottomSheetLayout.offsetYValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetY)
-        fragmentCameraBinding.bottomSheetLayout.offsetZValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetZ)
-    }
 
 
     // Update the values displayed in the bottom sheet. Reset Facelandmarker

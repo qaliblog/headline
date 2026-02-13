@@ -20,6 +20,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Shader
 import android.util.AttributeSet
@@ -29,12 +30,31 @@ import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
-import com.qali.headline.util.FaceMeshConstants
 import kotlin.math.max
 import kotlin.math.min
 
 class OverlayView(context: Context?, attrs: AttributeSet?) :
     View(context, attrs) {
+
+    companion object {
+        private const val LANDMARK_STROKE_WIDTH = 8F
+        private const val TAG = "Face Landmarker Overlay"
+
+        // 9-point mesh indices: Forehead, Chin, RightCheek, LeftCheek, Nose, RightEye, LeftEye, RightMouth, LeftMouth
+        private val MESH_LANDMARK_INDICES = intArrayOf(10, 152, 234, 454, 1, 33, 263, 61, 291)
+
+        // Triangle indices into MESH_LANDMARK_INDICES (0..8)
+        private val MESH_TRIANGLES = shortArrayOf(
+            0, 5, 4,  // Top, RightEye, Nose
+            0, 6, 4,  // Top, LeftEye, Nose
+            5, 2, 4,  // RightEye, RightCheek, Nose
+            6, 3, 4,  // LeftEye, LeftCheek, Nose
+            2, 7, 4,  // RightCheek, RightMouth, Nose
+            3, 8, 4,  // LeftCheek, LeftMouth, Nose
+            7, 1, 4,  // RightMouth, Chin, Nose
+            8, 1, 4   // LeftMouth, Chin, Nose
+        )
+    }
 
     private var results: FaceLandmarkerResult? = null
     private var linePaint = Paint()
@@ -46,9 +66,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var imageHeight: Int = 1
 
     private var maskBitmap: Bitmap? = null
-    private var sourceLandmarks: List<NormalizedLandmark>? = null
-    private var textureCoords: FloatArray? = null
-    private var vertexArray: FloatArray? = null
+    private var maskShaderPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private var srcTexCoords = FloatArray(MESH_LANDMARK_INDICES.size * 2)
 
     init {
         initPaints()
@@ -60,35 +79,23 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         pointPaint.reset()
         maskPaint.reset()
         maskBitmap = null
-        sourceLandmarks = null
-        textureCoords = null
-        vertexArray = null
         invalidate()
         initPaints()
     }
 
     fun setMaskImage(bitmap: Bitmap, landmarks: List<NormalizedLandmark>) {
         this.maskBitmap = bitmap
-        this.sourceLandmarks = landmarks
 
-        // Canonical Face Mesh has 468 vertices.
-        // We use exactly 468 for the mesh warping to stay consistent with indices.
-        val vertexCount = 468
-        if (landmarks.size < vertexCount) {
-            this.textureCoords = null
-            return
+        // Store source coordinates for mesh landmarks
+        for (i in MESH_LANDMARK_INDICES.indices) {
+            val idx = MESH_LANDMARK_INDICES[i]
+            if (idx < landmarks.size) {
+                srcTexCoords[i * 2] = landmarks[idx].x() * bitmap.width
+                srcTexCoords[i * 2 + 1] = landmarks[idx].y() * bitmap.height
+            }
         }
 
-        // Pre-calculate texture coordinates (pixel coordinates in the bitmap)
-        val coords = FloatArray(vertexCount * 2)
-        for (i in 0 until vertexCount) {
-            coords[i * 2] = landmarks[i].x() * bitmap.width
-            coords[i * 2 + 1] = landmarks[i].y() * bitmap.height
-        }
-        this.textureCoords = coords
-
-        maskPaint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        maskPaint.isAntiAlias = true
+        maskShaderPaint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         invalidate()
     }
 
@@ -123,7 +130,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
             // Iterate through each detected face
             faceLandmarkerResult.faceLandmarks().forEach { faceLandmarks ->
-                if (maskBitmap != null && textureCoords != null && sourceLandmarks != null) {
+                if (maskBitmap != null) {
                     drawMask(canvas, faceLandmarks, offsetX, offsetY)
                 } else {
                     // Draw all landmarks for the current face
@@ -142,41 +149,32 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         offsetX: Float,
         offsetY: Float
     ) {
-        val texCoords = textureCoords ?: return
-        val indices = FaceMeshConstants.TRIANGULATION_INDICES
+        if (maskBitmap == null) return
 
-        // Canonical Face Mesh has 468 vertices.
-        // MediaPipe might return 478 (including iris).
-        // We only use the first 468 for the mesh warping to match triangulation indices.
-        val vertexCount = 468
-        if (faceLandmarks.size < vertexCount || texCoords.size < vertexCount * 2) {
-            return
-        }
-
-        // Vertices for the current face (scaled to screen)
-        if (vertexArray == null || vertexArray?.size != vertexCount * 2) {
-            vertexArray = FloatArray(vertexCount * 2)
-        }
-        val verts = vertexArray!!
-        for (i in 0 until vertexCount) {
-            val landmark = faceLandmarks[i]
-            verts[i * 2] = landmark.x() * imageWidth * scaleFactor + offsetX
-            verts[i * 2 + 1] = landmark.y() * imageHeight * scaleFactor + offsetY
+        val dstVertices = FloatArray(MESH_LANDMARK_INDICES.size * 2)
+        for (i in MESH_LANDMARK_INDICES.indices) {
+            val idx = MESH_LANDMARK_INDICES[i]
+            if (idx < faceLandmarks.size) {
+                dstVertices[i * 2] = faceLandmarks[idx].x() * imageWidth * scaleFactor + offsetX
+                dstVertices[i * 2 + 1] = faceLandmarks[idx].y() * imageHeight * scaleFactor + offsetY
+            } else {
+                return // Missing key landmarks
+            }
         }
 
         canvas.drawVertices(
             Canvas.VertexMode.TRIANGLES,
-            vertexCount,
-            verts,
+            dstVertices.size,
+            dstVertices,
             0,
-            texCoords,
+            srcTexCoords,
             0,
             null,
             0,
-            indices,
+            MESH_TRIANGLES,
             0,
-            indices.size,
-            maskPaint
+            MESH_TRIANGLES.size,
+            maskShaderPaint
         )
     }
 
@@ -246,8 +244,4 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         invalidate()
     }
 
-    companion object {
-        private const val LANDMARK_STROKE_WIDTH = 8F
-        private const val TAG = "Face Landmarker Overlay"
-    }
 }

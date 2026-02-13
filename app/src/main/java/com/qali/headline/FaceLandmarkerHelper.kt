@@ -165,22 +165,19 @@ class FaceLandmarkerHelper(
                 Bitmap.Config.ARGB_8888
             )
         imageProxy.use { bitmapBuffer.copyPixelsFromBuffer(imageProxy.planes[0].buffer) }
-        imageProxy.close()
 
-        val matrix = Matrix().apply {
-            // Rotate the frame received from the camera to be in the same direction as it'll be shown
-            postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+        val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
 
-            // flip image if user use front camera
-            if (isFrontCamera) {
-                postScale(
-                    -1f,
-                    1f,
-                    imageProxy.width.toFloat(),
-                    imageProxy.height.toFloat()
-                )
-            }
+        val matrix = Matrix()
+        matrix.postRotate(rotation)
+
+        if (isFrontCamera) {
+            // After rotation, we might need to flip horizontally to match the mirrored preview
+            // For 90 or 270 degrees rotation, width and height are swapped
+            val rotatedWidth = if (rotation % 180 != 0f) imageProxy.height else imageProxy.width
+            matrix.postScale(-1f, 1f, rotatedWidth / 2f, 0f)
         }
+
         val rotatedBitmap = Bitmap.createBitmap(
             bitmapBuffer, 0, 0, bitmapBuffer.width, bitmapBuffer.height,
             matrix, true
