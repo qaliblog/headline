@@ -18,6 +18,7 @@ package com.qali.headline.fragment
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.ContentValues
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -28,6 +29,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.view.LayoutInflater
@@ -405,7 +407,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         val serviceIntent = Intent(requireContext(), RecordingService::class.java)
         requireContext().stopService(serviceIntent)
 
-        Toast.makeText(requireContext(), "Video saved to External Files", Toast.LENGTH_LONG).show()
+        Toast.makeText(requireContext(), "Video saved to DCIM/Headline", Toast.LENGTH_LONG).show()
     }
 
     private fun updateRecordButtonUi() {
@@ -430,16 +432,27 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         fragmentCameraBinding.overlay.draw(canvas)
         canvas.restore()
 
-        val photoFile = File(
-            requireContext().getExternalFilesDir(null),
-            "photo_${System.currentTimeMillis()}.jpg"
-        )
+        val filename = "photo_${System.currentTimeMillis()}.jpg"
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/Headline")
+            }
+        }
+
+        val contentResolver = requireContext().contentResolver
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
 
         try {
-            FileOutputStream(photoFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
+            uri?.let {
+                contentResolver.openOutputStream(it).use { out ->
+                    if (out != null) {
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
+                        Toast.makeText(requireContext(), "Photo saved to DCIM/Headline", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-            Toast.makeText(requireContext(), "Photo saved to External Files", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save photo", e)
             Toast.makeText(requireContext(), "Failed to save photo", Toast.LENGTH_SHORT).show()

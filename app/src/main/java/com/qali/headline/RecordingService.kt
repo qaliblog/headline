@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -13,7 +14,9 @@ import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -90,12 +93,28 @@ class RecordingService : Service() {
             MediaRecorder()
         }
 
+        val filename = "recording_${System.currentTimeMillis()}.mp4"
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, filename)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/Headline")
+            }
+        }
+
+        val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+        val fileDescriptor = uri?.let { contentResolver.openFileDescriptor(it, "rw") }?.fileDescriptor
+
         mediaRecorder?.apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            val videoFile = File(getExternalFilesDir(null), "recording_${System.currentTimeMillis()}.mp4")
-            setOutputFile(videoFile.absolutePath)
+            if (fileDescriptor != null) {
+                setOutputFile(fileDescriptor)
+            } else {
+                val videoFile = File(getExternalFilesDir(null), filename)
+                setOutputFile(videoFile.absolutePath)
+            }
             setVideoSize(width, height)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
