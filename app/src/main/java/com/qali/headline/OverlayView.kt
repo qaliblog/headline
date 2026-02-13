@@ -68,12 +68,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
     fun clear() {
         results = null
-        linePaint.reset()
-        pointPaint.reset()
-        maskPaint.reset()
-        maskBitmap = null
         invalidate()
-        initPaints()
     }
 
     fun setMaskImage(bitmap: Bitmap, landmarks: List<NormalizedLandmark>) {

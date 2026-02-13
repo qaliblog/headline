@@ -15,12 +15,25 @@ package com.qali.headline
  * limitations under the License.
  */
 
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 
 /**
  *  This ViewModel is used to store face landmarker helper settings
  */
 class MainViewModel : ViewModel() {
+
+    private var _maskBitmap: Bitmap? = null
+    private var _maskLandmarks: List<NormalizedLandmark>? = null
+
+    val maskBitmap: Bitmap? get() = _maskBitmap
+    val maskLandmarks: List<NormalizedLandmark>? get() = _maskLandmarks
+
+    fun setMask(bitmap: Bitmap, landmarks: List<NormalizedLandmark>) {
+        _maskBitmap = bitmap
+        _maskLandmarks = landmarks
+    }
 
     private var _delegate: Int = FaceLandmarkerHelper.DELEGATE_CPU
     private var _minFaceDetectionConfidence: Float =

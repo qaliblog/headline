@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -12,8 +13,11 @@ import android.hardware.display.VirtualDisplay
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -29,6 +33,7 @@ class RecordingService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaRecorder: MediaRecorder? = null
+    private var videoUri: Uri? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -90,13 +95,33 @@ class RecordingService : Service() {
             MediaRecorder()
         }
 
+        val filename = "recording_${System.currentTimeMillis()}.mp4"
+        val evenWidth = if (width % 2 == 0) width else width - 1
+        val evenHeight = if (height % 2 == 0) height else height - 1
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, filename)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/Headline")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+        }
+
+        videoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+        val fileDescriptor = videoUri?.let { contentResolver.openFileDescriptor(it, "rw") }?.fileDescriptor
+
         mediaRecorder?.apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            val videoFile = File(getExternalFilesDir(null), "recording_${System.currentTimeMillis()}.mp4")
-            setOutputFile(videoFile.absolutePath)
-            setVideoSize(width, height)
+            if (fileDescriptor != null) {
+                setOutputFile(fileDescriptor)
+            } else {
+                val videoFile = File(getExternalFilesDir(null), filename)
+                setOutputFile(videoFile.absolutePath)
+            }
+            setVideoSize(evenWidth, evenHeight)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             setVideoEncodingBitRate(5 * 1024 * 1024)
@@ -104,7 +129,7 @@ class RecordingService : Service() {
             prepare()
 
             virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "RecordingDisplay", width, height, density,
+                "RecordingDisplay", evenWidth, evenHeight, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 surface, null, null
             )
@@ -134,6 +159,16 @@ class RecordingService : Service() {
         mediaRecorder?.release()
         virtualDisplay?.release()
         mediaProjection?.stop()
+
+        videoUri?.let { uri ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Video.Media.IS_PENDING, 0)
+                }
+                contentResolver.update(uri, contentValues, null, null)
+            }
+        }
+
         super.onDestroy()
     }
 }
