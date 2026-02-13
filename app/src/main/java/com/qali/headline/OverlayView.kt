@@ -62,6 +62,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         maskBitmap = null
         sourceLandmarks = null
         textureCoords = null
+        vertexArray = null
         invalidate()
         initPaints()
     }
@@ -70,9 +71,17 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         this.maskBitmap = bitmap
         this.sourceLandmarks = landmarks
 
+        // Canonical Face Mesh has 468 vertices.
+        // We use exactly 468 for the mesh warping to stay consistent with indices.
+        val vertexCount = 468
+        if (landmarks.size < vertexCount) {
+            this.textureCoords = null
+            return
+        }
+
         // Pre-calculate texture coordinates (pixel coordinates in the bitmap)
-        val coords = FloatArray(landmarks.size * 2)
-        for (i in landmarks.indices) {
+        val coords = FloatArray(vertexCount * 2)
+        for (i in 0 until vertexCount) {
             coords[i * 2] = landmarks[i].x() * bitmap.width
             coords[i * 2 + 1] = landmarks[i].y() * bitmap.height
         }
@@ -136,23 +145,28 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val texCoords = textureCoords ?: return
         val indices = FaceMeshConstants.TRIANGULATION_INDICES
 
-        // Vertices for the current face (scaled to screen)
-        if (vertexArray == null || vertexArray?.size != faceLandmarks.size * 2) {
-            vertexArray = FloatArray(faceLandmarks.size * 2)
-        }
-        val verts = vertexArray!!
-        for (i in faceLandmarks.indices) {
-            verts[i * 2] = faceLandmarks[i].x() * imageWidth * scaleFactor + offsetX
-            verts[i * 2 + 1] = faceLandmarks[i].y() * imageHeight * scaleFactor + offsetY
+        // Canonical Face Mesh has 468 vertices.
+        // MediaPipe might return 478 (including iris).
+        // We only use the first 468 for the mesh warping to match triangulation indices.
+        val vertexCount = 468
+        if (faceLandmarks.size < vertexCount || texCoords.size < vertexCount * 2) {
+            return
         }
 
-        // Draw the warped mesh
-        // We use the first 468 landmarks as that's what's typically in the canonical model
-        // indices refer to these landmarks.
+        // Vertices for the current face (scaled to screen)
+        if (vertexArray == null || vertexArray?.size != vertexCount * 2) {
+            vertexArray = FloatArray(vertexCount * 2)
+        }
+        val verts = vertexArray!!
+        for (i in 0 until vertexCount) {
+            val landmark = faceLandmarks[i]
+            verts[i * 2] = landmark.x() * imageWidth * scaleFactor + offsetX
+            verts[i * 2 + 1] = landmark.y() * imageHeight * scaleFactor + offsetY
+        }
 
         canvas.drawVertices(
             Canvas.VertexMode.TRIANGLES,
-            faceLandmarks.size,
+            vertexCount,
             verts,
             0,
             texCoords,
