@@ -16,15 +16,20 @@ package com.qali.headline
  * limitations under the License.
  */
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
+import com.qali.headline.util.FaceMeshConstants
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import kotlin.math.max
 import kotlin.math.min
@@ -32,13 +37,30 @@ import kotlin.math.min
 class OverlayView(context: Context?, attrs: AttributeSet?) :
     View(context, attrs) {
 
+    companion object {
+        private const val LANDMARK_STROKE_WIDTH = 8F
+        private const val TAG = "Face Landmarker Overlay"
+
+        // Use all 468 facial landmarks for the mesh
+        private val MESH_LANDMARK_INDICES = IntArray(468) { it }
+
+        // Triangle indices from canonical face model
+        private val MESH_TRIANGLES = FaceMeshConstants.TRIANGULATION
+    }
+
     private var results: FaceLandmarkerResult? = null
     private var linePaint = Paint()
     private var pointPaint = Paint()
+    private var maskPaint = Paint()
 
     private var scaleFactor: Float = 1f
     private var imageWidth: Int = 1
     private var imageHeight: Int = 1
+
+    private var maskBitmap: Bitmap? = null
+    private var maskShaderPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private var srcTexCoords = FloatArray(MESH_LANDMARK_INDICES.size * 2)
+    private var dstVertices = FloatArray(MESH_LANDMARK_INDICES.size * 2)
 
     init {
         initPaints()
@@ -48,8 +70,26 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         results = null
         linePaint.reset()
         pointPaint.reset()
+        maskPaint.reset()
+        maskBitmap = null
         invalidate()
         initPaints()
+    }
+
+    fun setMaskImage(bitmap: Bitmap, landmarks: List<NormalizedLandmark>) {
+        this.maskBitmap = bitmap
+
+        // Store source coordinates for mesh landmarks
+        for (i in MESH_LANDMARK_INDICES.indices) {
+            val idx = MESH_LANDMARK_INDICES[i]
+            if (idx < landmarks.size) {
+                srcTexCoords[i * 2] = landmarks[idx].x() * bitmap.width
+                srcTexCoords[i * 2 + 1] = landmarks[idx].y() * bitmap.height
+            }
+        }
+
+        maskShaderPaint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        invalidate()
     }
 
     private fun initPaints() {
@@ -68,7 +108,6 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
         // Clear previous drawings if results exist but have no face landmarks
         if (results?.faceLandmarks().isNullOrEmpty()) {
-            clear()
             return
         }
 
@@ -84,13 +123,51 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
             // Iterate through each detected face
             faceLandmarkerResult.faceLandmarks().forEach { faceLandmarks ->
-                // Draw all landmarks for the current face
-                drawFaceLandmarks(canvas, faceLandmarks, offsetX, offsetY)
+                if (maskBitmap != null) {
+                    drawMask(canvas, faceLandmarks, offsetX, offsetY)
+                } else {
+                    // Draw all landmarks for the current face
+                    drawFaceLandmarks(canvas, faceLandmarks, offsetX, offsetY)
 
-                // Draw all connectors for the current face
-                drawFaceConnectors(canvas, faceLandmarks, offsetX, offsetY)
+                    // Draw all connectors for the current face
+                    drawFaceConnectors(canvas, faceLandmarks, offsetX, offsetY)
+                }
             }
         }
+    }
+
+    private fun drawMask(
+        canvas: Canvas,
+        faceLandmarks: List<NormalizedLandmark>,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        if (maskBitmap == null) return
+
+        for (i in MESH_LANDMARK_INDICES.indices) {
+            val idx = MESH_LANDMARK_INDICES[i]
+            if (idx < faceLandmarks.size) {
+                dstVertices[i * 2] = faceLandmarks[idx].x() * imageWidth * scaleFactor + offsetX
+                dstVertices[i * 2 + 1] = faceLandmarks[idx].y() * imageHeight * scaleFactor + offsetY
+            } else {
+                return // Missing key landmarks
+            }
+        }
+
+        canvas.drawVertices(
+            Canvas.VertexMode.TRIANGLES,
+            dstVertices.size,
+            dstVertices,
+            0,
+            srcTexCoords,
+            0,
+            null,
+            0,
+            MESH_TRIANGLES,
+            0,
+            MESH_TRIANGLES.size,
+            maskShaderPaint
+        )
     }
 
     /**
@@ -159,8 +236,4 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         invalidate()
     }
 
-    companion object {
-        private const val LANDMARK_STROKE_WIDTH = 8F
-        private const val TAG = "Face Landmarker Overlay"
-    }
 }

@@ -20,17 +20,15 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.MediaRecorder
-import android.media.projection.MediaProjection
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
-import android.view.Choreographer
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -55,11 +53,7 @@ import com.qali.headline.MainViewModel
 import com.qali.headline.R
 import com.qali.headline.RecordingService
 import com.qali.headline.databinding.FragmentCameraBinding
-import com.qali.headline.renderer.FaceMaskRenderer
-import com.qali.headline.util.PoseUtils
 import com.google.mediapipe.tasks.vision.core.RunningMode
-import java.io.File
-import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -94,18 +88,10 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     /** Blocking ML operations are performed using this executor */
     private lateinit var backgroundExecutor: ExecutorService
 
-    private lateinit var faceMaskRenderer: FaceMaskRenderer
-    private val frameCallback = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            faceMaskRenderer.render()
-            Choreographer.getInstance().postFrameCallback(this)
-        }
-    }
-
-    private val filePickerLauncher = registerForActivityResult(
+    private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { loadModelFromUri(it) }
+        uri?.let { loadMaskFromUri(it) }
     }
 
     private val screenCaptureLauncher = registerForActivityResult(
@@ -123,7 +109,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onResume() {
         super.onResume()
-        Choreographer.getInstance().postFrameCallback(frameCallback)
         // Make sure that all permissions are still present, since the
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
@@ -143,7 +128,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onPause() {
         super.onPause()
-        Choreographer.getInstance().removeFrameCallback(frameCallback)
         if(this::faceLandmarkerHelper.isInitialized) {
             viewModel.setMaxFaces(faceLandmarkerHelper.maxNumFaces)
             viewModel.setMinFaceDetectionConfidence(faceLandmarkerHelper.minFaceDetectionConfidence)
@@ -161,7 +145,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             stopRecording()
         }
         _fragmentCameraBinding = null
-        faceMaskRenderer.onDestroy()
         super.onDestroyView()
 
         // Shut down our background executor
@@ -186,18 +169,8 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        faceMaskRenderer = FaceMaskRenderer(requireContext())
-        faceMaskRenderer.setDebugMode(false) // Set to true to see debug cube and logs
-        fragmentCameraBinding.filamentSurface.apply {
-            setZOrderOnTop(true)
-            holder.setFormat(PixelFormat.TRANSLUCENT)
-            faceMaskRenderer.init(this)
-        }
-
-        loadDefaultModel()
-
-        fragmentCameraBinding.fabModelPicker.setOnClickListener {
-            showModelPicker()
+        fragmentCameraBinding.fabImagePicker.setOnClickListener {
+            imagePickerLauncher.launch("image/*")
         }
 
         mediaProjectionManager = requireContext().getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -239,52 +212,40 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
-        updateModelAdjusterUi()
     }
 
-    private fun loadDefaultModel() {
+    private fun loadMaskFromUri(uri: Uri) {
         try {
-            val buffer = readAsset("models/face_mask.glb")
-            faceMaskRenderer.loadModel(buffer)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load default model", e)
-        }
-    }
+            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val source = ImageDecoder.createSource(requireContext().contentResolver, uri)
+                ImageDecoder.decodeBitmap(source)
+            } else {
+                MediaStore.Images.Media.getBitmap(requireContext().contentResolver, uri)
+            }.copy(Bitmap.Config.ARGB_8888, true)
 
-    private fun readAsset(path: String): ByteBuffer {
-        val inputStream = requireContext().assets.open(path)
-        val bytes = inputStream.readBytes()
-        val buffer = ByteBuffer.allocateDirect(bytes.size)
-        buffer.put(bytes)
-        buffer.flip()
-        return buffer
-    }
+            // Scan the image for landmarks
+            backgroundExecutor.execute {
+                val tempHelper = FaceLandmarkerHelper(
+                    context = requireContext(),
+                    runningMode = RunningMode.IMAGE,
+                    minFaceDetectionConfidence = 0.5f,
+                    maxNumFaces = 1
+                )
+                val result = tempHelper.detectImage(bitmap)
+                tempHelper.clearFaceLandmarker()
 
-    private fun showModelPicker() {
-        val assets = requireContext().assets.list("models")?.toList() ?: emptyList()
-        val bottomSheet = ModelPickerBottomSheet(
-            models = assets,
-            onModelSelected = { modelPath ->
-                val buffer = readAsset("models/$modelPath")
-                faceMaskRenderer.loadModel(buffer)
-            },
-            onFilePickerClicked = {
-                filePickerLauncher.launch("*/*")
+                activity?.runOnUiThread {
+                    if (result != null && result.result.faceLandmarks().isNotEmpty()) {
+                        fragmentCameraBinding.overlay.setMaskImage(bitmap, result.result.faceLandmarks()[0])
+                        Toast.makeText(requireContext(), "Mask updated", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(requireContext(), "No face detected in selected image", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-        )
-        bottomSheet.show(childFragmentManager, "ModelPicker")
-    }
-
-    private fun loadModelFromUri(uri: Uri) {
-        try {
-            val inputStream = requireContext().contentResolver.openInputStream(uri)
-            val bytes = inputStream?.readBytes() ?: return
-            val buffer = ByteBuffer.allocateDirect(bytes.size)
-            buffer.put(bytes)
-            buffer.flip()
-            faceMaskRenderer.loadModel(buffer)
         } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Failed to load model", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Failed to load mask image", e)
+            Toast.makeText(requireContext(), "Failed to load image", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -393,50 +354,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     /* no op */
                 }
             }
-
-        // Model Scale
-        fragmentCameraBinding.bottomSheetLayout.scaleMinus.setOnClickListener {
-            if (viewModel.currentScaleFactor > 0.1f) {
-                viewModel.setScaleFactor(viewModel.currentScaleFactor - 0.1f)
-                updateModelAdjusterUi()
-            }
-        }
-        fragmentCameraBinding.bottomSheetLayout.scalePlus.setOnClickListener {
-            if (viewModel.currentScaleFactor < 5.0f) {
-                viewModel.setScaleFactor(viewModel.currentScaleFactor + 0.1f)
-                updateModelAdjusterUi()
-            }
-        }
-
-        // Offset X
-        fragmentCameraBinding.bottomSheetLayout.offsetXMinus.setOnClickListener {
-            viewModel.setOffsetX(viewModel.currentOffsetX - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetXPlus.setOnClickListener {
-            viewModel.setOffsetX(viewModel.currentOffsetX + 0.01f)
-            updateModelAdjusterUi()
-        }
-
-        // Offset Y
-        fragmentCameraBinding.bottomSheetLayout.offsetYMinus.setOnClickListener {
-            viewModel.setOffsetY(viewModel.currentOffsetY - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetYPlus.setOnClickListener {
-            viewModel.setOffsetY(viewModel.currentOffsetY + 0.01f)
-            updateModelAdjusterUi()
-        }
-
-        // Offset Z
-        fragmentCameraBinding.bottomSheetLayout.offsetZMinus.setOnClickListener {
-            viewModel.setOffsetZ(viewModel.currentOffsetZ - 0.01f)
-            updateModelAdjusterUi()
-        }
-        fragmentCameraBinding.bottomSheetLayout.offsetZPlus.setOnClickListener {
-            viewModel.setOffsetZ(viewModel.currentOffsetZ + 0.01f)
-            updateModelAdjusterUi()
-        }
     }
 
     private fun startRecording() {
@@ -483,21 +400,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         }
     }
 
-    private fun updateModelAdjusterUi() {
-        fragmentCameraBinding.bottomSheetLayout.scaleValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentScaleFactor)
-        fragmentCameraBinding.bottomSheetLayout.offsetXValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetX)
-        fragmentCameraBinding.bottomSheetLayout.offsetYValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetY)
-        fragmentCameraBinding.bottomSheetLayout.offsetZValue.text =
-            String.format(Locale.US, "%.2f", viewModel.currentOffsetZ)
-
-        PoseUtils.SCALE_FACTOR = viewModel.currentScaleFactor
-        PoseUtils.OFFSET_X = viewModel.currentOffsetX
-        PoseUtils.OFFSET_Y = viewModel.currentOffsetY
-        PoseUtils.OFFSET_Z = viewModel.currentOffsetZ
-    }
 
 
     // Update the values displayed in the bottom sheet. Reset Facelandmarker
@@ -632,22 +534,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     resultBundle.inputImageWidth,
                     RunningMode.LIVE_STREAM
                 )
-
-                // Update 3D model transform
-                if (resultBundle.result.faceLandmarks().isNotEmpty() &&
-                    resultBundle.result.facialTransformationMatrixes().isPresent) {
-                    val landmarks = resultBundle.result.faceLandmarks()[0]
-                    val poseMatrix = resultBundle.result.facialTransformationMatrixes().get()[0]
-                    val aspect = fragmentCameraBinding.filamentSurface.width.toFloat() /
-                                 fragmentCameraBinding.filamentSurface.height.toFloat()
-
-                    val matrix = PoseUtils.getFinalMatrix(
-                        poseMatrix,
-                        landmarks,
-                        aspect
-                    )
-                    faceMaskRenderer.updateModelTransform(matrix)
-                }
 
                 // Force a redraw
                 fragmentCameraBinding.overlay.invalidate()
