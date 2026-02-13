@@ -22,6 +22,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -46,14 +47,15 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.navigation.Navigation
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_DRAGGING
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.qali.headline.FaceLandmarkerHelper
 import com.qali.headline.MainViewModel
 import com.qali.headline.R
 import com.qali.headline.RecordingService
 import com.qali.headline.databinding.FragmentCameraBinding
 import com.google.mediapipe.tasks.vision.core.RunningMode
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -72,9 +74,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     private lateinit var faceLandmarkerHelper: FaceLandmarkerHelper
     private val viewModel: MainViewModel by activityViewModels()
-    private val faceBlendshapesResultAdapter by lazy {
-        FaceBlendshapesResultAdapter()
-    }
 
     private var preview: Preview? = null
     private var imageAnalyzer: ImageAnalysis? = null
@@ -182,9 +181,24 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             }
         }
 
-        with(fragmentCameraBinding.recyclerviewResults) {
-            layoutManager = LinearLayoutManager(requireContext())
-            adapter = faceBlendshapesResultAdapter
+        fragmentCameraBinding.fabCapture.setOnClickListener {
+            takePicture()
+        }
+
+        val bottomSheetBehavior = BottomSheetBehavior.from(fragmentCameraBinding.bottomSheetLayout.root)
+        fragmentCameraBinding.btnSettings.setOnClickListener {
+            if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED) {
+                bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+            } else {
+                bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+            }
+        }
+
+        // Restore mask if it exists in ViewModel
+        viewModel.maskBitmap?.let { bitmap ->
+            viewModel.maskLandmarks?.let { landmarks ->
+                fragmentCameraBinding.overlay.setMaskImage(bitmap, landmarks)
+            }
         }
 
         // Initialize our background executor
@@ -236,7 +250,9 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
                 activity?.runOnUiThread {
                     if (result != null && result.result.faceLandmarks().isNotEmpty()) {
-                        fragmentCameraBinding.overlay.setMaskImage(bitmap, result.result.faceLandmarks()[0])
+                        val landmarks = result.result.faceLandmarks()[0]
+                        fragmentCameraBinding.overlay.setMaskImage(bitmap, landmarks)
+                        viewModel.setMask(bitmap, landmarks)
                         Toast.makeText(requireContext(), "Mask updated", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(requireContext(), "No face detected in selected image", Toast.LENGTH_SHORT).show()
@@ -396,7 +412,37 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         if (isRecording) {
             fragmentCameraBinding.fabRecord.setImageResource(android.R.drawable.ic_media_pause)
         } else {
-            fragmentCameraBinding.fabRecord.setImageResource(R.drawable.ic_baseline_photo_camera_24)
+            fragmentCameraBinding.fabRecord.setImageResource(android.R.drawable.ic_media_play)
+        }
+    }
+
+    private fun takePicture() {
+        val previewBitmap = fragmentCameraBinding.viewFinder.bitmap ?: return
+        val bitmap = Bitmap.createBitmap(previewBitmap.width, previewBitmap.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawBitmap(previewBitmap, 0f, 0f, null)
+
+        // Draw the overlay on top of the preview bitmap
+        val scaleX = previewBitmap.width.toFloat() / fragmentCameraBinding.overlay.width
+        val scaleY = previewBitmap.height.toFloat() / fragmentCameraBinding.overlay.height
+        canvas.save()
+        canvas.scale(scaleX, scaleY)
+        fragmentCameraBinding.overlay.draw(canvas)
+        canvas.restore()
+
+        val photoFile = File(
+            requireContext().getExternalFilesDir(null),
+            "photo_${System.currentTimeMillis()}.jpg"
+        )
+
+        try {
+            FileOutputStream(photoFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
+            }
+            Toast.makeText(requireContext(), "Photo saved to External Files", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save photo", e)
+            Toast.makeText(requireContext(), "Failed to save photo", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -518,12 +564,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     ) {
         activity?.runOnUiThread {
             if (_fragmentCameraBinding != null) {
-                if (fragmentCameraBinding.recyclerviewResults.scrollState != SCROLL_STATE_DRAGGING) {
-                    faceBlendshapesResultAdapter.updateResults(resultBundle.result)
-                    faceBlendshapesResultAdapter.notifyDataSetChanged()
-                }
-
-
                 fragmentCameraBinding.bottomSheetLayout.inferenceTimeVal.text =
                     String.format("%d ms", resultBundle.inferenceTime)
 
@@ -543,17 +583,11 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onEmpty() {
         fragmentCameraBinding.overlay.clear()
-        activity?.runOnUiThread {
-            faceBlendshapesResultAdapter.updateResults(null)
-            faceBlendshapesResultAdapter.notifyDataSetChanged()
-        }
     }
 
     override fun onError(error: String, errorCode: Int) {
         activity?.runOnUiThread {
             Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
-            faceBlendshapesResultAdapter.updateResults(null)
-            faceBlendshapesResultAdapter.notifyDataSetChanged()
 
             if (errorCode == FaceLandmarkerHelper.GPU_ERROR) {
                 fragmentCameraBinding.bottomSheetLayout.spinnerDelegate.setSelection(

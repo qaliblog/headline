@@ -43,9 +43,4 @@
             app:popUpTo="@id/camera_fragment"
             app:popUpToInclusive="true" />
     </fragment>
-
-    <fragment
-        android:id="@+id/gallery_fragment"
-        android:name="com.qali.headline.fragment.GalleryFragment"
-        android:label="GalleryFragment" />
 </navigation>
