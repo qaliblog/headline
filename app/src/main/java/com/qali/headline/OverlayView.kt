@@ -31,6 +31,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.qali.headline.util.FaceMeshConstants
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
+import java.util.Optional
 import kotlin.math.max
 import kotlin.math.min
 
@@ -62,6 +63,16 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var srcTexCoords = FloatArray(MESH_LANDMARK_INDICES.size * 2)
     private var dstVertices = FloatArray(MESH_LANDMARK_INDICES.size * 2)
 
+    private var modelMesh: Mesh? = null
+    private var modelLandmarks: List<NormalizedLandmark>? = null
+    private var modelBaseRotationY: Float = 0f
+
+    private var sphereScale: Float = 1f
+    private var offsetZ: Float = 0f
+    private var stretchX: Float = 1f
+    private var stretchY: Float = 1f
+    private var stretchZ: Float = 1f
+
     init {
         initPaints()
     }
@@ -73,6 +84,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
     fun setMaskImage(bitmap: Bitmap, landmarks: List<NormalizedLandmark>) {
         this.maskBitmap = bitmap
+        this.modelMesh = null // Clear 3D model if 2D mask is set
 
         // Store source coordinates for mesh landmarks
         for (i in MESH_LANDMARK_INDICES.indices) {
@@ -84,6 +96,23 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         }
 
         maskShaderPaint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        invalidate()
+    }
+
+    fun setModelData(mesh: Mesh?, landmarks: List<NormalizedLandmark>?, rotationY: Float) {
+        this.modelMesh = mesh
+        this.modelLandmarks = landmarks
+        this.modelBaseRotationY = rotationY
+        if (mesh != null) this.maskBitmap = null // Clear 2D mask if 3D model is set
+        invalidate()
+    }
+
+    fun setAdjusters(scale: Float, offsetZ: Float, sx: Float, sy: Float, sz: Float) {
+        this.sphereScale = scale
+        this.offsetZ = offsetZ
+        this.stretchX = sx
+        this.stretchY = sy
+        this.stretchZ = sz
         invalidate()
     }
 
@@ -117,8 +146,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val offsetY = (height - scaledImageHeight) / 2f
 
             // Iterate through each detected face
-            faceLandmarkerResult.faceLandmarks().forEach { faceLandmarks ->
-                if (maskBitmap != null) {
+            faceLandmarkerResult.faceLandmarks().forEachIndexed { index, faceLandmarks ->
+                if (modelMesh != null && modelLandmarks != null) {
+                    val matricesOptional = faceLandmarkerResult.facialTransformationMatrixes()
+                    val matrices = if (matricesOptional.isPresent) matricesOptional.get() else null
+                    val matrixObj = matrices?.getOrNull(index)
+                    draw3DModel(canvas, faceLandmarks, matrixObj, offsetX, offsetY)
+                } else if (maskBitmap != null) {
                     drawMask(canvas, faceLandmarks, offsetX, offsetY)
                 } else {
                     // Draw all landmarks for the current face
@@ -179,6 +213,154 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val y = landmark.y() * imageHeight * scaleFactor + offsetY
             canvas.drawPoint(x, y, pointPaint)
         }
+    }
+
+    private fun getMatrixData(matrix: Any?): FloatArray? {
+        if (matrix == null) return null
+        return try {
+            val method = matrix.javaClass.methods.firstOrNull { it.returnType == FloatArray::class.java }
+            method?.invoke(matrix) as? FloatArray
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun draw3DModel(
+        canvas: Canvas,
+        faceLandmarks: List<NormalizedLandmark>,
+        transformationMatrixObj: Any?,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        val transformationMatrix = getMatrixData(transformationMatrixObj)
+        val mesh = modelMesh ?: return
+        val modLandmarks = modelLandmarks ?: return
+
+        val liveSphere = getBoundingSphere(faceLandmarks, (imageWidth * scaleFactor).toInt(), (imageHeight * scaleFactor).toInt())
+        val modelSphere = getBoundingSphere(modLandmarks, 512, 512)
+
+        val baseScale = liveSphere.radius / modelSphere.radius
+        val finalScale = baseScale * sphereScale
+
+        val vertices = mesh.vertices
+        val indices = mesh.indices
+        val numVertices = vertices.size / 3
+        val projected = FloatArray(numVertices * 2)
+        val zCoords = FloatArray(numVertices)
+
+        // Pre-calculate base rotation
+        val baseRad = Math.toRadians(modelBaseRotationY.toDouble()).toFloat()
+        val cosB = Math.cos(baseRad.toDouble()).toFloat()
+        val sinB = Math.sin(baseRad.toDouble()).toFloat()
+
+        // We can use the transformationMatrix for rotation if it exists
+        // MediaPipe transformation matrix is 4x4
+        // If not, we'll just do a simple centered draw
+
+        // Let's re-center the mesh based on its own bounding box first.
+        val mCX = (mesh.maxX + mesh.minX) / 2f
+        val mCY = (mesh.maxY + mesh.minY) / 2f
+        val mCZ = (mesh.maxZ + mesh.minZ) / 2f
+
+        for (i in 0 until numVertices) {
+            val x = vertices[i * 3]
+            val y = vertices[i * 3 + 1]
+            val z = vertices[i * 3 + 2]
+
+            var rx = x - mCX
+            var ry = y - mCY
+            var rz = z - mCZ
+
+            // 2. Apply base rotation
+            val rrx = rx * cosB + rz * sinB
+            val rry = ry
+            val rrz = -rx * sinB + rz * cosB
+
+            rx = rrx; ry = rry; rz = rrz
+
+            // 3. Apply user stretch
+            rx *= stretchX
+            ry *= stretchY
+            rz *= stretchZ
+
+            // 4. Apply transformation matrix if available (for live rotation)
+            if (transformationMatrix != null && transformationMatrix.size == 16) {
+                val tx = transformationMatrix[0] * rx + transformationMatrix[4] * ry + transformationMatrix[8] * rz
+                val ty = transformationMatrix[1] * rx + transformationMatrix[5] * ry + transformationMatrix[9] * rz
+                val tz = transformationMatrix[2] * rx + transformationMatrix[6] * ry + transformationMatrix[10] * rz
+                rx = tx; ry = ty; rz = tz
+            }
+
+            // 5. Scale and translate to live sphere
+            val fx = rx * finalScale + liveSphere.centerX + offsetX
+            val fy = ry * finalScale + liveSphere.centerY + offsetY
+            val fz = rz * finalScale + liveSphere.centerZ + offsetZ * liveSphere.radius
+
+            projected[i * 2] = fx
+            projected[i * 2 + 1] = fy
+            zCoords[i] = fz
+        }
+
+        // Sort triangles by average Z for basic depth buffering
+        val numTriangles = indices.size / 3
+        val triIndices = (0 until numTriangles).sortedByDescending { t ->
+            val v1 = indices[t * 3].toInt() and 0xFFFF
+            val v2 = indices[t * 3 + 1].toInt() and 0xFFFF
+            val v3 = indices[t * 3 + 2].toInt() and 0xFFFF
+            (zCoords[v1] + zCoords[v2] + zCoords[v3]) / 3f
+        }
+
+        val sortedIndices = ShortArray(indices.size)
+        for (i in 0 until numTriangles) {
+            val t = triIndices[i]
+            sortedIndices[i * 3] = indices[t * 3]
+            sortedIndices[i * 3 + 1] = indices[t * 3 + 1]
+            sortedIndices[i * 3 + 2] = indices[t * 3 + 2]
+        }
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = Color.GRAY
+        paint.style = Paint.Style.FILL
+
+        canvas.drawVertices(
+            Canvas.VertexMode.TRIANGLES,
+            numVertices,
+            projected,
+            0,
+            null,
+            0,
+            null,
+            0,
+            sortedIndices,
+            0,
+            sortedIndices.size,
+            paint
+        )
+    }
+
+
+    private data class Sphere(val centerX: Float, val centerY: Float, val centerZ: Float, val radius: Float)
+
+    private fun getBoundingSphere(landmarks: List<NormalizedLandmark>, width: Int, height: Int): Sphere {
+        var sumX = 0f; var sumY = 0f; var sumZ = 0f
+        for (l in landmarks) {
+            sumX += l.x() * width
+            sumY += l.y() * height
+            sumZ += l.z() * width
+        }
+        val cx = sumX / landmarks.size
+        val cy = sumY / landmarks.size
+        val cz = sumZ / landmarks.size
+
+        var maxDistSq = 0f
+        for (l in landmarks) {
+            val dx = l.x() * width - cx
+            val dy = l.y() * height - cy
+            val dz = l.z() * width - cz
+            val distSq = dx * dx + dy * dy + dz * dz
+            if (distSq > maxDistSq) maxDistSq = distSq
+        }
+        return Sphere(cx, cy, cz, Math.sqrt(maxDistSq.toDouble()).toFloat())
     }
 
     /**
