@@ -95,6 +95,12 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         uri?.let { loadMaskFromUri(it) }
     }
 
+    private val modelPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { loadModelFromUri(it) }
+    }
+
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -174,6 +180,10 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             imagePickerLauncher.launch("image/*")
         }
 
+        fragmentCameraBinding.fabModelPicker.setOnClickListener {
+            modelPickerLauncher.launch("*/*")
+        }
+
         mediaProjectionManager = requireContext().getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         fragmentCameraBinding.fabRecord.setOnClickListener {
             if (isRecording) {
@@ -196,12 +206,27 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             }
         }
 
-        // Restore mask if it exists in ViewModel
+        // Restore mask or model if it exists in ViewModel
         viewModel.maskBitmap?.let { bitmap ->
             viewModel.maskLandmarks?.let { landmarks ->
                 fragmentCameraBinding.overlay.setMaskImage(bitmap, landmarks)
             }
         }
+        viewModel.modelMesh?.let { mesh ->
+            fragmentCameraBinding.overlay.setModelData(mesh, viewModel.modelLandmarks, viewModel.modelBaseRotationY)
+        }
+        viewModel.modelLoaded.observe(viewLifecycleOwner) { loaded ->
+            if (loaded) {
+                viewModel.modelMesh?.let { mesh ->
+                    fragmentCameraBinding.overlay.setModelData(mesh, viewModel.modelLandmarks, viewModel.modelBaseRotationY)
+                    Toast.makeText(requireContext(), "3D Model loaded", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        fragmentCameraBinding.overlay.setAdjusters(
+            viewModel.sphereScale, viewModel.offsetZ,
+            viewModel.stretchX, viewModel.stretchY, viewModel.stretchZ
+        )
 
         // Initialize our background executor
         backgroundExecutor = Executors.newSingleThreadExecutor()
@@ -267,6 +292,29 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         }
     }
 
+    private fun loadModelFromUri(uri: Uri) {
+        try {
+            backgroundExecutor.execute {
+                val inputStream = requireContext().contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val mesh = com.qali.headline.util.ObjLoader.parse(inputStream)
+                    viewModel.processModel(requireContext(), mesh)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load 3D model", e)
+            Toast.makeText(requireContext(), "Failed to load model", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateAdjusters() {
+        fragmentCameraBinding.overlay.setAdjusters(
+            viewModel.sphereScale, viewModel.offsetZ,
+            viewModel.stretchX, viewModel.stretchY, viewModel.stretchZ
+        )
+        updateControlsUi()
+    }
+
     private fun initBottomSheetControls() {
         // init bottom sheet settings
         fragmentCameraBinding.bottomSheetLayout.maxFacesValue.text =
@@ -283,6 +331,54 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             String.format(
                 Locale.US, "%.2f", viewModel.currentMinFacePresenceConfidence
             )
+
+        // 3D Adjusters
+        fragmentCameraBinding.bottomSheetLayout.sphereScaleValue.text = String.format(Locale.US, "%.2f", viewModel.sphereScale)
+        fragmentCameraBinding.bottomSheetLayout.offsetZValue.text = String.format(Locale.US, "%.2f", viewModel.offsetZ)
+        fragmentCameraBinding.bottomSheetLayout.stretchXValue.text = String.format(Locale.US, "%.2f", viewModel.stretchX)
+        fragmentCameraBinding.bottomSheetLayout.stretchYValue.text = String.format(Locale.US, "%.2f", viewModel.stretchY)
+        fragmentCameraBinding.bottomSheetLayout.stretchZValue.text = String.format(Locale.US, "%.2f", viewModel.stretchZ)
+
+        fragmentCameraBinding.bottomSheetLayout.sphereScaleMinus.setOnClickListener {
+            viewModel.setSphereScale(viewModel.sphereScale - 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.sphereScalePlus.setOnClickListener {
+            viewModel.setSphereScale(viewModel.sphereScale + 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.offsetZMinus.setOnClickListener {
+            viewModel.setOffsetZ(viewModel.offsetZ - 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.offsetZPlus.setOnClickListener {
+            viewModel.setOffsetZ(viewModel.offsetZ + 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchXMinus.setOnClickListener {
+            viewModel.setStretchX(viewModel.stretchX - 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchXPlus.setOnClickListener {
+            viewModel.setStretchX(viewModel.stretchX + 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchYMinus.setOnClickListener {
+            viewModel.setStretchY(viewModel.stretchY - 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchYPlus.setOnClickListener {
+            viewModel.setStretchY(viewModel.stretchY + 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchZMinus.setOnClickListener {
+            viewModel.setStretchZ(viewModel.stretchZ - 0.1f)
+            updateAdjusters()
+        }
+        fragmentCameraBinding.bottomSheetLayout.stretchZPlus.setOnClickListener {
+            viewModel.setStretchZ(viewModel.stretchZ + 0.1f)
+            updateAdjusters()
+        }
 
         // When clicked, lower face detection score threshold floor
         fragmentCameraBinding.bottomSheetLayout.detectionThresholdMinus.setOnClickListener {
@@ -484,6 +580,12 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                 "%.2f",
                 faceLandmarkerHelper.minFacePresenceConfidence
             )
+
+        fragmentCameraBinding.bottomSheetLayout.sphereScaleValue.text = String.format(Locale.US, "%.2f", viewModel.sphereScale)
+        fragmentCameraBinding.bottomSheetLayout.offsetZValue.text = String.format(Locale.US, "%.2f", viewModel.offsetZ)
+        fragmentCameraBinding.bottomSheetLayout.stretchXValue.text = String.format(Locale.US, "%.2f", viewModel.stretchX)
+        fragmentCameraBinding.bottomSheetLayout.stretchYValue.text = String.format(Locale.US, "%.2f", viewModel.stretchY)
+        fragmentCameraBinding.bottomSheetLayout.stretchZValue.text = String.format(Locale.US, "%.2f", viewModel.stretchZ)
 
         // Needs to be cleared instead of reinitialized because the GPU
         // delegate needs to be initialized on the thread using it when applicable
