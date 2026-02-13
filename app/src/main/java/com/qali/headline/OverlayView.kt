@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
+import com.qali.headline.util.FaceMeshConstants
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import kotlin.math.max
 import kotlin.math.min
@@ -40,20 +41,11 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         private const val LANDMARK_STROKE_WIDTH = 8F
         private const val TAG = "Face Landmarker Overlay"
 
-        // 9-point mesh indices: Forehead, Chin, RightCheek, LeftCheek, Nose, RightEye, LeftEye, RightMouth, LeftMouth
-        private val MESH_LANDMARK_INDICES = intArrayOf(10, 152, 234, 454, 1, 33, 263, 61, 291)
+        // Use all 468 facial landmarks for the mesh
+        private val MESH_LANDMARK_INDICES = IntArray(468) { it }
 
-        // Triangle indices into MESH_LANDMARK_INDICES (0..8)
-        private val MESH_TRIANGLES = shortArrayOf(
-            0, 5, 4,  // Top, RightEye, Nose
-            0, 6, 4,  // Top, LeftEye, Nose
-            5, 2, 4,  // RightEye, RightCheek, Nose
-            6, 3, 4,  // LeftEye, LeftCheek, Nose
-            2, 7, 4,  // RightCheek, RightMouth, Nose
-            3, 8, 4,  // LeftCheek, LeftMouth, Nose
-            7, 1, 4,  // RightMouth, Chin, Nose
-            8, 1, 4   // LeftMouth, Chin, Nose
-        )
+        // Triangle indices from canonical face model
+        private val MESH_TRIANGLES = FaceMeshConstants.TRIANGULATION
     }
 
     private var results: FaceLandmarkerResult? = null
@@ -68,6 +60,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var maskBitmap: Bitmap? = null
     private var maskShaderPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var srcTexCoords = FloatArray(MESH_LANDMARK_INDICES.size * 2)
+    private var dstVertices = FloatArray(MESH_LANDMARK_INDICES.size * 2)
 
     init {
         initPaints()
@@ -151,7 +144,6 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     ) {
         if (maskBitmap == null) return
 
-        val dstVertices = FloatArray(MESH_LANDMARK_INDICES.size * 2)
         for (i in MESH_LANDMARK_INDICES.indices) {
             val idx = MESH_LANDMARK_INDICES[i]
             if (idx < faceLandmarks.size) {
